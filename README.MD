@@ -13,7 +13,7 @@ Adicione a dependência da `ejm-config` ao seu projeto (exemplo com **Maven**):
 <dependency>
   <groupId>br.com.ejm</groupId>
   <artifactId>ejm-config</artifactId>
-  <version>0.0.1</version>
+  <version>0.0.1-BETA</version>
 </dependency>
 ```
 Ou com Gradle:
@@ -23,7 +23,7 @@ implementation 'br.com.ejm:ejm-config:1.0.0'
 ## 🧩 Estrutura recomendada
 É boa prática criar uma biblioteca delegate separada que contenha:
 DTOs e Models;
-Interfaces de serviço que estendem java.rmi.Remote.
+Interfaces de serviço que estendem EjmDelegate.
 Por exemplo:
 ```
 br.com.usuario.delegate
@@ -34,6 +34,7 @@ br.com.usuario.delegate
       
 ```
 Essa biblioteca poderá ser usada tanto no servidor (provider) quanto no cliente (consumer).
+Importe no delegate também o `ejm-config` para que a interface delegate consiga extender `EjmDelegate`.
 
 ## 🖥️ Servidor (Provider)
 No projeto que disponibiliza o serviço remoto:
