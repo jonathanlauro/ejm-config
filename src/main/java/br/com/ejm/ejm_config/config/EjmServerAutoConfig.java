@@ -13,13 +13,10 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.rmi.Naming;
 import java.rmi.Remote;
+import java.rmi.registry.LocateRegistry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.Map;
 
-/**
- * Exporta automaticamente beans anotados com @EjmRemote como serviços RMI.
- * Injeta automaticamente o método ping() caso não seja implementado.
- */
 @Component
 public class EjmServerAutoConfig implements ApplicationContextAware, SmartInitializingSingleton {
 
@@ -34,51 +31,54 @@ public class EjmServerAutoConfig implements ApplicationContextAware, SmartInitia
     @Override
     public void afterSingletonsInstantiated() {
         try {
+            System.setProperty("java.rmi.server.hostname", "localhost");
             exportServices();
         } catch (Exception e) {
             LOGGER.error("[EJM] ❌ Erro ao exportar serviços RMI: {}", e.getMessage(), e);
         }
     }
 
-    /**
-     * Exporta todos os beans anotados com @EjmRemote para o registro RMI.
-     */
     private void exportServices() throws Exception {
         Map<String, Object> remotes = context.getBeansWithAnnotation(EjmService.class);
         if (remotes.isEmpty()) {
-            LOGGER.warn("[EJM] ⚠️ Nenhum serviço com @EjmRemote encontrado.");
+            LOGGER.warn("[EJM] ⚠️ Nenhum serviço com @EjmService encontrado.");
             return;
         }
 
         for (Map.Entry<String, Object> entry : remotes.entrySet()) {
             Object bean = entry.getValue();
-            Class<?>[] interfaces = bean.getClass().getInterfaces();
-            if (interfaces.length == 0) {
-                LOGGER.warn("[EJM] ⚠️ Bean '{}' não implementa nenhuma interface remota.", entry.getKey());
-                continue;
-            }
+            EjmService annotation = bean.getClass().getAnnotation(EjmService.class);
 
-            Class<?> iface = interfaces[0];
-            String serviceName = iface.getSimpleName();
-
-            Object wrapped = wrapIfMissingPing(bean, iface);
+            int port = annotation.port();
+            String name = annotation.name().isEmpty()
+                    ? bean.getClass().getInterfaces()[0].getSimpleName()
+                    : annotation.name();
 
             try {
+                // Sobe um registry local se ainda não estiver rodando
+                try {
+                    LocateRegistry.createRegistry(port);
+                    LOGGER.info("[EJM] 🚀 RMI Registry iniciado na porta {}.", port);
+                } catch (Exception e) {
+                    LOGGER.info("[EJM] ℹ️ RMI Registry já em execução na porta {}.", port);
+                }
+
+                Object wrapped = wrapIfMissingPing(bean, bean.getClass().getInterfaces()[0]);
+
                 Remote stub = (Remote) UnicastRemoteObject.exportObject((Remote) wrapped, 0);
-                Naming.rebind(serviceName, stub);
-                LOGGER.info("[EJM] ✅ Serviço '{}' exportado via RMI com ping automático.", serviceName);
+                String rmiUrl = String.format("rmi://localhost:%d/%s", port, name);
+
+                Naming.rebind(rmiUrl, stub);
+                LOGGER.info("[EJM] ✅ Serviço '{}' exportado em '{}'.", name, rmiUrl);
+
             } catch (Exception e) {
-                LOGGER.error("[EJM] ❌ Falha ao exportar '{}': {}", serviceName, e.getMessage(), e);
+                LOGGER.error("[EJM] ❌ Falha ao exportar '{}': {}", name, e.getMessage(), e);
             }
         }
     }
 
-    /**
-     * Se o bean não tiver implementação de ping(), cria um proxy dinâmico que injeta um ping() padrão.
-     */
     private Object wrapIfMissingPing(Object target, Class<?> iface) {
         boolean hasPing = false;
-
         for (Method method : iface.getMethods()) {
             if (method.getName().equals("ping") && method.getParameterCount() == 0) {
                 hasPing = true;
