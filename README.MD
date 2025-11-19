@@ -1,81 +1,85 @@
-# ejm-config
+# ⚙️ ejm-config
 
-Biblioteca para configuração simplificada de serviços remotos via **EJM (Enterprise Java Messaging)** utilizando **RMI** no **Spring Boot**.  
-O objetivo da `ejm-config` é permitir que aplicações exponham e consumam serviços remotos de forma segura, desacoplada e padronizada, semelhante ao funcionamento do **EJB Remote**.
 
----
 
-## 🚀 Instalação
 
-Adicione a dependência da `ejm-config` ao seu projeto (exemplo com **Maven**):
+Biblioteca para configuração simplificada de serviços remotos via EJM (Enterprise Java Messaging) utilizando RMI no Spring Boot.
+Seu objetivo é permitir que aplicações exponham e consumam serviços remotos de forma segura, padronizada e extremamente fácil, funcionando de modo semelhante ao EJB Remote.
 
-```xml
+### 🧩 Estrutura essencial
+```
+🔌 Provider (Servidor)
+🖧 EJMS + RMI Registry
+📦 Cliente (Consumer)
+```
+### 🧱 Arquitetura — visão geral
+```
+flowchart LR
+A[Client Application<br>Spring Boot + @EnableEjmClient]
+--> |RMI Lookup| B((EJM Registry))
+
+    B --> C[EJM Server Application<br>@EnableEjmServe]
+
+    C --> |Exposes Remote Service| D[UsuarioServiceImpl<br>@EjmService]
+
+    A --> |Injects Proxy| D
+```
+### 📦 Instalação
+#### Maven
+```
 <dependency>
-  <groupId>br.com.ejm</groupId>
-  <artifactId>ejm-config</artifactId>
-  <version>0.0.1-BETA</version>
+    <groupId>br.com.ejm</groupId>
+    <artifactId>ejm-config</artifactId>
+    <version>0.0.1-BETA</version>
 </dependency>
 ```
-Ou com Gradle:
+#### Gradle
 ```
 implementation 'br.com.ejm:ejm-config:1.0.0'
 ```
-## 🧩 Estrutura recomendada
-É boa prática criar uma biblioteca delegate separada que contenha:
-DTOs e Models;
-Interfaces de serviço que estendem EjmDelegate.
-Por exemplo:
+### 🧩 Estrutura recomendada (Delegate Layer)
+Crie uma lib compartilhada contendo DTOs, Models e as interfaces remotas:
 ```
 br.com.usuario.delegate
- ├── dto/
- ├── model/
- └── service/
-      └── UsuarioService.java
-      
+├── dto/
+├── model/
+└── service/
+└── UsuarioService.java  <-- estende EjmDelegate
 ```
-Essa biblioteca poderá ser usada tanto no servidor (provider) quanto no cliente (consumer).
-Importe no delegate também o `ejm-config` para que a interface delegate consiga extender `EjmDelegate`.
-
-## 🖥️ Servidor (Provider)
-No projeto que disponibiliza o serviço remoto:
-
-Implemente a interface do delegate:
+Essa biblioteca é usada tanto no servidor quanto no cliente.
+### 🖥️ Servidor (Provider)
+#### Implemente o serviço remoto
 ```
 @EjmService(name = "UsuarioService")
 public class UsuarioServiceImpl implements UsuarioService {
-    // implementação dos métodos
+// implementação real
 }
 ```
-Habilite o servidor EJM na classe principal:
+#### Ative o servidor EJM
 ```
 @SpringBootApplication
 @EnableEjmServe
 public class UsuarioApplication {
-    public static void main(String[] args) {
-        SpringApplication.run(UsuarioApplication.class, args);
-    }
+public static void main(String[] args) {
+SpringApplication.run(UsuarioApplication.class, args);
+}
 }
 ```
-Garanta que o servidor tenha conectividade de rede acessível para clientes RMI.
-
-## 💻 Cliente (Consumer)
-No projeto que consome o serviço remoto:
-
-Habilite o cliente EJM na classe principal:
+### 💻 Cliente (Consumer)
+#### Ative o EJM Client
 ```
 @SpringBootApplication
 @EnableEjmClient
 public class PedidoApplication {
-    public static void main(String[] args) {
-        SpringApplication.run(PedidoApplication.class, args);
-    }
+public static void main(String[] args) {
+SpringApplication.run(PedidoApplication.class, args);
+}
 }
 ```
-Configure o arquivo config-ejm.xml em:
-
+### Configure o config-ejm.xml
+```
 src/main/resources/config-ejm.xml
-
-Exemplo:
+```
 ```
 <ejm>
     <rmi>
@@ -85,8 +89,7 @@ Exemplo:
     </rmi>
 </ejm>
 ```
-
-Injete o serviço remoto normalmente com Spring:
+### Consuma o serviço
 ```
 @Service
 public class PedidoService {
@@ -100,16 +103,104 @@ public class PedidoService {
     }
 }
 ```
-## ⚙️ Como funciona internamente
-A anotação @EnableEjmServe configura automaticamente o registro RMI e expõe os beans anotados com @EjmService.
+### ⚙️ Funcionamento interno
+- @EnableEjmServe cria o RMI Registry e publica automaticamente todos os beans anotados com @EjmService.
+- @EnableEjmClient lê o config-ejm.xml e cria os proxies dinâmicos, permitindo @Autowired.
+- Toda comunicação é feita via invocação remota RMI.
+### ☸️ Compatibilidade com Kubernetes (K8s)
+A biblioteca é 100% compatível com Kubernetes.
+Para funcionar corretamente no cluster:
 
-A anotação @EnableEjmClient lê o arquivo config-ejm.xml e registra dinamicamente os proxies remotos no contexto Spring.
-O @Autowired funciona normalmente tanto para beans locais quanto remotos.
+1. Exponha o RMI Registry como um Service
+2. Garanta que o hostname do provider seja acessível pelo client
+3. Utilize Service Discovery interno do K8s (<service-name>.<namespace>.svc.cluster.local)
+### 📦 Exemplo Kubernetes — Provider (Servidor)
+#### Deployment
+```
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: usuario-provider
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: usuario-provider
+  template:
+    metadata:
+      labels:
+        app: usuario-provider
+    spec:
+      containers:
+        - name: usuario-provider
+          image: seu-registro/usuario-provider:latest
+          ports:
+            - containerPort: 1099
+          env:
+            - name: EJM_PORT
+              value: "1099"
 
-## 🧠 Boas práticas
-Sempre use uma lib delegate compartilhada entre cliente e servidor.
-Mantenha o nome da interface no @EjmService(name = ...) idêntico ao informado no config-ejm.xml.
-Evite dependências bidirecionais entre os projetos.
+```
+#### Service
+```
+apiVersion: v1
+kind: Service
+metadata:
+  name: usuario-provider
+spec:
+  selector:
+    app: usuario-provider
+  ports:
+    - name: rmi
+      port: 1099
+      targetPort: 1099
+  type: ClusterIP
 
-## 📄 Licença
-Este projeto está licenciado sob a Licença MIT. Veja o arquivo LICENSE para mais detalhes.
+```
+### 📦 Exemplo Kubernetes — Client (Consumer)
+```
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pedido-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pedido-consumer
+  template:
+    metadata:
+      labels:
+        app: pedido-consumer
+    spec:
+      containers:
+        - name: pedido-consumer
+          image: seu-registro/pedido-consumer:latest
+          env:
+            - name: EJM_SERVER_HOST
+              value: "usuario-provider.default.svc.cluster.local"
+            - name: EJM_SERVER_PORT
+              value: "1099"
+
+```
+
+### config-ejm.xml para Kubernetes
+```
+<ejm>
+    <rmi>
+        <host>${EJM_SERVER_HOST}</host>
+        <port>${EJM_SERVER_PORT}</port>
+        <base-package>br.com.usersdelegate.remote</base-package>
+    </rmi>
+</ejm>
+```
+### 🧠 Boas práticas
+- Utilize uma lib delegate compartilhada entre Provider e Consumer
+- Mantenha nomes idênticos entre @EjmService(name="...") e o config-ejm.xml
+- Evite dependências cruzadas
+- Em Kubernetes, sempre conecte usando o service name:
+```
+usuario-provider.default.svc.cluster.local
+```
+### 📄 Licença
+MIT — veja o arquivo LICENSE.

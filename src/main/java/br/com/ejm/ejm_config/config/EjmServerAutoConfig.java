@@ -31,12 +31,35 @@ public class EjmServerAutoConfig implements ApplicationContextAware, SmartInitia
     @Override
     public void afterSingletonsInstantiated() {
         try {
-            System.setProperty("java.rmi.server.hostname", "localhost");
+            configurePublicHostname();
             exportServices();
         } catch (Exception e) {
             LOGGER.error("[EJM] ❌ Erro ao exportar serviços RMI: {}", e.getMessage(), e);
         }
     }
+
+    /**
+     * Define Hostname Público (RMI Stub)
+     *
+     * LOCAL:
+     *   EJM_PUBLIC_HOST ausente -> usa "localhost"
+     *
+     * DOCKER/KUBERNETES:
+     *   EJM_PUBLIC_HOST define hostname, ex: usuarios-service
+     */
+    private void configurePublicHostname() {
+        String host = System.getenv("EJM_PUBLIC_HOST");
+
+        if (host == null || host.isBlank()) {
+            host = "localhost"; // fallback local
+            LOGGER.info("[EJM] 🌍 Ambiente LOCAL detectado. Usando hostname '{}'.", host);
+        } else {
+            LOGGER.info("[EJM] 🌐 Ambiente DOCKER/KUBERNETES detectado. Usando hostname externo '{}'.", host);
+        }
+
+        System.setProperty("java.rmi.server.hostname", host);
+    }
+
 
     private void exportServices() throws Exception {
         Map<String, Object> remotes = context.getBeansWithAnnotation(EjmService.class);
@@ -49,27 +72,36 @@ public class EjmServerAutoConfig implements ApplicationContextAware, SmartInitia
             Object bean = entry.getValue();
             EjmService annotation = bean.getClass().getAnnotation(EjmService.class);
 
-            int port = annotation.port();
+            int registryPort = annotation.port();        // ex: 1099
+            int exportPort   = annotation.exportPort();  // ex: 5001
+
             String name = annotation.name().isEmpty()
                     ? bean.getClass().getInterfaces()[0].getSimpleName()
                     : annotation.name();
 
             try {
-                // Sobe um registry local se ainda não estiver rodando
+                // 🔹 Sobe um registry na porta informada (1099 normalmente)
                 try {
-                    LocateRegistry.createRegistry(port);
-                    LOGGER.info("[EJM] 🚀 RMI Registry iniciado na porta {}.", port);
+                    LocateRegistry.createRegistry(registryPort);
+                    LOGGER.info("[EJM] 🚀 RMI Registry iniciado na porta {}.", registryPort);
                 } catch (Exception e) {
-                    LOGGER.info("[EJM] ℹ️ RMI Registry já em execução na porta {}.", port);
+                    LOGGER.info("[EJM] ℹ️ RMI Registry já em execução na porta {}.", registryPort);
                 }
 
+                // 🔹 Injeta ping() caso a interface não tenha
                 Object wrapped = wrapIfMissingPing(bean, bean.getClass().getInterfaces()[0]);
 
-                Remote stub = (Remote) UnicastRemoteObject.exportObject((Remote) wrapped, 0);
-                String rmiUrl = String.format("rmi://localhost:%d/%s", port, name);
+                // 🔹 EXPORTAÇÃO CORRIGIDA — usa porta fixa (NÃO usar 0 no Kubernetes)
+                Remote stub = (Remote) UnicastRemoteObject.exportObject((Remote) wrapped, exportPort);
+
+                // 🔹 Define URL com hostname público configurado no inicio
+                String host = System.getProperty("java.rmi.server.hostname");
+                String rmiUrl = String.format("rmi://%s:%d/%s", host, registryPort, name);
 
                 Naming.rebind(rmiUrl, stub);
-                LOGGER.info("[EJM] ✅ Serviço '{}' exportado em '{}'.", name, rmiUrl);
+
+                LOGGER.info("[EJM] ✅ Serviço '{}' exportado em '{}'. (exportPort={})",
+                        name, rmiUrl, exportPort);
 
             } catch (Exception e) {
                 LOGGER.error("[EJM] ❌ Falha ao exportar '{}': {}", name, e.getMessage(), e);
@@ -77,6 +109,8 @@ public class EjmServerAutoConfig implements ApplicationContextAware, SmartInitia
         }
     }
 
+
+    /** Injeta automaticamente um método ping() se não existir */
     private Object wrapIfMissingPing(Object target, Class<?> iface) {
         boolean hasPing = false;
         for (Method method : iface.getMethods()) {

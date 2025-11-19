@@ -8,7 +8,17 @@ import java.lang.annotation.*;
 @Documented
 @Service
 public @interface EjmService {
-    String value() default "";  // <-- este método precisa existir
+
+    // Alias opcional (padrão do Spring)
+    String value() default "";
+
+    // Porta do RMI Registry (normalmente 1099)
     int port() default 1099;
+
+    // Nome do serviço no Registry
     String name() default "";
+
+    // Porta fixa usada na exportação do objeto remoto
+    // NECESSÁRIA para Docker/Kubernetes
+    int exportPort() default 5001;
 }

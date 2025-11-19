@@ -11,7 +11,7 @@
 
     <groupId>br.com.ejm</groupId>
     <artifactId>ejm-config</artifactId>
-    <version>0.0.1-BETA</version>
+    <version>0.0.2-BETA</version>
     <packaging>jar</packaging>
 
 
